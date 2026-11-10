@@ -31,15 +31,15 @@ import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase
 import {getFirestore,doc,onSnapshot,setDoc,collection,addDoc,deleteDoc} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {getAuth,signInWithEmailAndPassword,signOut,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 // ===== PASTE YOUR FIREBASE SETTINGS HERE (replace the four PASTE_ values) =====
-const FB={apiKey:"AIzaSyC9ExHsHgLv77HvsxMtnfQoJQmyQy1pnoQ",authDomain:"mpsg-games.firebaseapp.com",projectId:"mpsg-games",appId:"243874705932:web:08b9273c1846a774dbf429"};
+const FB={apiKey:"AIzaSyC9ExHsHgLv77HvsxMtnfQoJQmyQy1pnoQ",authDomain:"mpsg-games.firebaseapp.com",projectId:"mpsg-games",appId:"1:243874705932:web:08b9273c1846a774dbf429"};
 // ==============================================================================
 const $=s=>document.querySelector(s),uid=()=>Math.random().toString(36).slice(2,8);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const DEF={name:'Office Games Tournament',pts:[10,7,5,3,1],win:3,draw:1,legs:1,locked:false,formUrl:'',people:[],teams:[],games:[],fx:{}};
+const DEF={name:'Office Games Tournament',pts:[10,7,5,3,1],win:3,draw:1,legs:1,locked:false,formUrl:'',start:'2026-12-01',end:'2026-12-31',times:'12:30, 16:00',off:'2026-12-04, 2026-12-25, 2026-12-26',par:2,koOn:true,tb:{},ko:{},note:'',people:[],teams:[],games:[],fx:{}};
 const COL=['Red','Blue','Green','Yellow','Orange','Purple','Pink','Teal','Black','White','Grey','Gold'];
 const GAMES=['Ludo','Oware','UNO','Jenga','Monopoly','Scrabble','Chess','Draughts','Table Tennis','FIFA/EA Sports FC','Charades','Connect 4','Tug of War','General Knowledge Quiz','Musical Chairs'];
 let signups=[],fdb,auth,sref,unsubS=null;
-let S=JSON.parse(JSON.stringify(DEF)),admin=false,tab='board',mode='',gsel='',tsel='',rst=0;
+let S=JSON.parse(JSON.stringify(DEF)),admin=false,tab='board',mode='',gsel='',tsel='',rst=0,fg='';
 function toast(t){const e=$('#toast');e.textContent=t;e.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display='none',2600)}
 async function init(){
  if(FB.apiKey.startsWith('PASTE')){mode='setup';render();return}
@@ -52,15 +52,28 @@ function save(){render();if(mode==='live')setDoc(sref,JSON.parse(JSON.stringify(
 const tn=id=>(S.teams.find(t=>t.id===id)||{}).name||'?',pn=id=>(S.people.find(p=>p.id===id)||{}).name||'?';
 const act=()=>S.games.filter(g=>g.on);
 const opts=(a,sel,all)=>(all?`<option value="">${all}</option>`:'')+a.map(([v,l])=>`<option value="${esc(v)}"${v===sel?' selected':''}>${esc(l)}</option>`).join('');
-const real=g=>(S.fx[g]||[]).filter(f=>f.b);
-const complete=g=>real(g).length>0&&real(g).every(f=>f.done);
+const gn=id=>(S.games.find(g=>g.id===id)||{}).name||'',tnm=id=>id?tn(id):'TBD';
+const lg=g=>(S.fx[g]||[]).filter(f=>f.b&&!f.k),ko=g=>(S.fx[g]||[]).filter(f=>f.k);
+const hasKO=()=>S.koOn&&S.teams.length>=4;
+const win=f=>f.sa>f.sb?f.a:f.sa<f.sb?f.b:f.w==='a'?f.a:f.w==='b'?f.b:null;
+const stg=f=>({sf1:'Semi-final 1',sf2:'Semi-final 2','3p':'Third place',f:'Final'}[f.k]||'Round '+f.r);
+const fd=f=>f.d?new Date(f.d+'T12:00').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'})+(f.tm?' '+f.tm:''):'';
+const dkey=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const tlist=()=>S.times.split(',').map(x=>x.trim()).filter(Boolean),oset=()=>new Set(S.off.split(',').map(x=>x.trim()));
+function slotsIn(){const t=tlist().length,o=oset();let c=0;const d=new Date(S.start+'T12:00'),e=new Date(S.end+'T12:00');for(;d<=e;d.setDate(d.getDate()+1))if(d.getDay()%6&&!o.has(dkey(d)))c+=t;return c}
 function table(g){const m={},R=S.teams.map(t=>m[t.id]={t,P:0,W:0,D:0,L:0,F:0,A:0});
- real(g).filter(f=>f.done&&m[f.a]&&m[f.b]).forEach(f=>{const a=m[f.a],b=m[f.b];a.P++;b.P++;a.F+=f.sa;a.A+=f.sb;b.F+=f.sb;b.A+=f.sa;
+ lg(g).filter(f=>f.done&&m[f.a]&&m[f.b]).forEach(f=>{const a=m[f.a],b=m[f.b];a.P++;b.P++;a.F+=f.sa;a.A+=f.sb;b.F+=f.sb;b.A+=f.sa;
   if(f.sa>f.sb){a.W++;b.L++}else if(f.sa<f.sb){b.W++;a.L++}else{a.D++;b.D++}});
- R.forEach(r=>{r.Pts=r.W*S.win+r.D*S.draw;r.GD=r.F-r.A});
- return R.sort((x,y)=>y.Pts-x.Pts||y.GD-x.GD||y.F-x.F||x.t.name.localeCompare(y.t.name))}
+ R.forEach(r=>{r.Pts=r.W*S.win+r.D*S.draw;r.GD=r.F-r.A;r.tb=+(S.tb||{})[g+'|'+r.t.id]||0});
+ R.sort((x,y)=>y.Pts-x.Pts||y.GD-x.GD||y.F-x.F||y.tb-x.tb||x.t.name.localeCompare(y.t.name));
+ const same=(a,b)=>a&&b&&a.Pts===b.Pts&&a.GD===b.GD&&a.F===b.F&&a.tb===b.tb;R.forEach((r,i)=>r.tie=same(r,R[i+1])||same(r,R[i-1]));return R}
+const leagueDone=g=>lg(g).length>0&&lg(g).every(f=>f.done);
+function finished(g){if(!leagueDone(g))return false;if(!hasKO())return true;const K=ko(g),f=K.find(x=>x.k==='f'),p=K.find(x=>x.k==='3p');return !!(f&&p&&f.done&&p.done)}
+function order(g){const t=table(g).map(r=>r.t.id);if(!hasKO())return t;const K=ko(g),f=K.find(x=>x.k==='f'),p=K.find(x=>x.k==='3p'),o=x=>win(x)===x.a?x.b:x.a;const top=[win(f),o(f),win(p),o(p)];return[...top,...t.filter(x=>!top.includes(x))]}
+function adv(g){const F=S.fx[g]||[],q=k=>F.find(x=>x.k===k),s1=q('sf1'),s2=q('sf2'),f=q('f'),p=q('3p');if(!s1||!s2)return;
+ const w=x=>x.done?win(x):null,l=x=>{const v=w(x);return v?(v===x.a?x.b:x.a):null};f.a=w(s1);f.b=w(s2);p.a=l(s1);p.b=l(s2)}
 function board(){const R={};S.teams.forEach(t=>R[t.id]={t,pts:0,m:[0,0,0]});let fin=0;
- act().forEach(g=>{if(!complete(g.id))return;fin++;table(g.id).forEach((r,i)=>{R[r.t.id].pts+=S.pts[Math.min(i,4)];if(i<3)R[r.t.id].m[i]++})});
+ act().forEach(g=>{if(!finished(g.id))return;fin++;order(g.id).forEach((id,i)=>{if(R[id]){R[id].pts+=S.pts[Math.min(i,4)];if(i<3)R[id].m[i]++}})});
  const L=Object.values(R).sort((x,y)=>y.pts-x.pts||y.m[0]-x.m[0]||y.m[1]-x.m[1]||y.m[2]-x.m[2]);return{L,fin,tot:act().length}}
 function rr(ids,legs){const t=[...ids];if(t.length%2)t.push(null);const m=t.length,o=[];
  for(let l=0;l<legs;l++)for(let r=0;r<m-1;r++)for(let k=0;k<m/2;k++){
@@ -73,59 +86,90 @@ function vBoard(){const{L,fin,tot}=board();
  const c=tot&&fin===tot?`<div class="champ">\u{1F3C6} Grand Champion: ${esc(L[0].t.name)}${L[1]&&L[1].pts===L[0].pts&&L[1].m[0]===L[0].m[0]?' (level on points \u2013 organiser decides)':''}</div>`:`<p class="mu">${fin} of ${tot} games finished</p>`;
  return reg()+c+`<div class="cd tw"><h2>Overall leaderboard</h2><table><tr><th>#</th><th>Team</th><th>Points</th><th>1st</th><th>2nd</th><th>3rd</th></tr>${L.map((r,i)=>`<tr><td>${i+1}</td><td><b>${esc(r.t.name)}</b></td><td><b>${r.pts}</b></td><td>${r.m[0]}</td><td>${r.m[1]}</td><td>${r.m[2]}</td></tr>`).join('')||'<tr><td colspan=6 class="mu">No teams yet.</td></tr>'}</table></div>`}
 function vTeams(){return reg()+`<div class="cd"><input id="q" placeholder="Find my team: type your name" style="width:100%"></div><div class="grid">${S.teams.map(t=>`<div class="cd tc" data-n="${esc((t.name+' '+t.m.map(pn).join(' ')).toLowerCase())}"><h2>${esc(t.name)}</h2>${t.m.map(id=>`<div>${id===t.cap?'\u2B50 ':''}${esc(pn(id))}<span class="mu"> ${esc((S.people.find(p=>p.id===id)||{}).dept||'')}</span></div>`).join('')}<p class="mu">${t.m.length} members</p></div>`).join('')||'<p class="mu">Teams have not been made yet.</p>'}</div>`}
-function vFix(){const g=gamesSel();let f=(S.fx[g]||[]).filter(x=>!tsel||x.a===tsel||x.b===tsel).sort((x,y)=>x.r-y.r);
- return `<div class="cd"><div class="row"><select data-s="g">${opts(act().map(x=>[x.id,x.name]),g)}</select><select data-s="t">${opts(S.teams.map(t=>[t.id,t.name]),tsel,'All teams')}</select></div></div>
- <div class="cd tw"><table><tr><th>Round</th><th>Match</th><th>Result</th></tr>${f.map(x=>`<tr><td>${x.r}</td><td>${x.b?esc(tn(x.a))+' v '+esc(tn(x.b)):esc(tn(x.a))+' rests'}</td><td>${x.b&&x.done?x.sa+' - '+x.sb:x.b?'\u2013':''}</td></tr>`).join('')||'<tr><td colspan=3 class="mu">No fixtures yet.</td></tr>'}</table></div>`}
-function vSt(){const g=gamesSel();return `<div class="cd"><select data-s="g">${opts(act().map(x=>[x.id,x.name]),g)}</select></div><div class="cd tw"><table><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr>${table(g).map((r,i)=>`<tr><td>${i+1}</td><td><b>${esc(r.t.name)}</b></td><td>${r.P}</td><td>${r.W}</td><td>${r.D}</td><td>${r.L}</td><td>${r.F}</td><td>${r.A}</td><td>${r.GD}</td><td><b>${r.Pts}</b></td></tr>`).join('')}</table><p class="mu">Order: points, goal difference, goals for, then name. ${complete(g)?'Game finished.':''}</p></div>`}
+function vFix(){let L=[];Object.keys(S.fx).forEach(g=>{if((!fg||fg===g)&&S.games.some(x=>x.id===g&&x.on))S.fx[g].forEach(f=>L.push({...f,g}))});
+ L=L.filter(x=>(!tsel||x.a===tsel||x.b===tsel)&&(tsel||x.b||x.k)).sort((x,y)=>(x.d||'9').localeCompare(y.d||'9')||(x.tm||'').localeCompare(y.tm||'')||x.r-y.r);
+ return `<div class="cd"><div class="row"><select data-s="fg">${opts(act().map(x=>[x.id,x.name]),fg,'All games')}</select><select data-s="t">${opts(S.teams.map(t=>[t.id,t.name]),tsel,'All teams')}</select></div></div>
+ <div class="cd tw"><table><tr><th>When</th><th>Game</th><th>Stage</th><th>Match</th><th>Result</th></tr>${L.map(x=>`<tr><td>${fd(x)}</td><td>${esc(gn(x.g))}</td><td>${stg(x)}</td><td>${x.b||x.k?esc(tnm(x.a))+' v '+esc(tnm(x.b)):esc(tn(x.a))+' rests'}</td><td>${(x.b||x.k)&&x.done?x.sa+' - '+x.sb+(x.sa===x.sb?' (tie-break)':''):''}</td></tr>`).join('')||'<tr><td colspan=5 class="mu">No fixtures yet.</td></tr>'}</table></div>`}
+function vSt(){const g=gamesSel(),T=table(g),K=ko(g);
+ return `<div class="cd"><select data-s="g">${opts(act().map(x=>[x.id,x.name]),g)}</select></div><div class="cd tw"><table><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th>${admin?'<th>Tie-break</th>':''}</tr>${T.map((r,i)=>`<tr><td>${i+1}${r.tie?'=':''}</td><td><b>${esc(r.t.name)}</b></td><td>${r.P}</td><td>${r.W}</td><td>${r.D}</td><td>${r.L}</td><td>${r.F}</td><td>${r.A}</td><td>${r.GD}</td><td><b>${r.Pts}</b></td>${admin?`<td><input type="number" step="0.5" style="width:70px" data-s="tb" data-id="${g}|${r.t.id}" value="${r.tb}"></td>`:''}</tr>`).join('')}</table>
+ <p class="mu">League order: points, goal difference, goals for${admin?', your tie-break number':''}, then name. A = after the number means teams are still level.${hasKO()?' The top 4 go into the knockout.':''}</p></div>
+ ${K.length?`<div class="cd tw"><h2>Knockout</h2><table><tr><th>When</th><th>Stage</th><th>Match</th><th>Result</th></tr>${K.map(x=>`<tr><td>${fd(x)}</td><td>${stg(x)}</td><td>${esc(tnm(x.a))} v ${esc(tnm(x.b))}</td><td>${x.done?x.sa+' - '+x.sb:''}</td></tr>`).join('')}</table></div>`:''}
+ ${finished(g)?`<div class="cd"><b>Final order:</b> ${order(g).slice(0,4).map((id,i)=>(i+1)+'. '+esc(tn(id))).join(' &nbsp; ')}</div>`:''}`}
 const vLogin=()=>`<div class="cd"><h2>Admin sign in</h2><input id="lem" type="email" placeholder="Admin email" style="width:100%"><input id="lpw" type="password" placeholder="Password" style="width:100%;margin-top:6px"><button class="b" data-a="login">Sign in</button></div>`;
-const vJoin=()=>{const d=localStorage.getItem('ogtj');return `<div class="cd"><h2>Join the ${esc(S.name)}</h2>${d?`<p class="ok">Thanks ${esc(d)}, you are registered. Check the Teams page once teams are announced.</p>`:`<input id="jn" placeholder="Full name" style="width:100%"><input id="jd" placeholder="Department" style="width:100%;margin-top:6px"><button class="b g" data-a="join">Register</button>`}<p><a href="#" class="mu">View the tournament</a></p></div>`};
+const mail=t=>{const e=t.m.map(i=>(S.people.find(p=>p.id===i)||{}).email).filter(Boolean);return e.length?`<a class="b" href="mailto:?bcc=${encodeURIComponent(e.join(';'))}&subject=${encodeURIComponent(S.name+': you are in team '+t.name)}&body=${encodeURIComponent('Hello team '+t.name+',\n\nYou are in team '+t.name+' for the '+S.name+'. Captain: '+(t.cap?pn(t.cap):'to be announced')+'.\n\nTeam members:\n'+t.m.map(pn).join('\n'))}">Email this team (${e.length})</a>`:'<span class="mu">no emails</span>'};
+const myTeam=nm=>{const p=S.people.find(x=>x.name.toLowerCase()===(nm||'').toLowerCase());const t=p&&S.teams.find(x=>x.m.includes(p.id));return t?`<p class="ok"><b>Your team: ${esc(t.name)}</b><br>Captain: ${esc(t.cap?pn(t.cap):'to be announced')}</p>`:'<p class="mu">Teams have not been announced yet. Come back to this link later.</p>'};
+const vJoin=()=>{const d=localStorage.getItem('ogtj');return `<div class="cd"><h2>Join the ${esc(S.name)}</h2>${d?`<p class="ok">Thanks ${esc(d)}, you are registered.</p>${myTeam(d)}`:`<input id="jn" placeholder="Full name" style="width:100%"><input id="jd" placeholder="Department" style="width:100%;margin-top:6px"><input id="je" type="email" placeholder="Work email (optional)" style="width:100%;margin-top:6px"><label style="display:block;margin:8px 0"><input type="checkbox" id="jc"> I would like to be a team captain</label><button class="b g" data-a="join">Register</button>`}<p><a href="#" class="mu">View the tournament</a></p></div>`};
 const signCard=()=>{const l=location.href.split('#')[0]+'#join';return `<div class="cd"><h2>Registration link</h2><p class="mu">Share this link. People enter their name and department.</p><input id="jl" readonly value="${esc(l)}" style="width:100%"><button class="b" data-a="copy">Copy link</button><p><b>${signups.length}</b> new sign-ups waiting. <button class="b g" data-a="imp"${signups.length?'':' disabled'}>Add them to People</button></p><button class="b" data-a="fill"${S.locked?'':' disabled'}>Put unassigned people into the smallest teams</button> <button class="b r" data-a="logout">Sign out</button></div>`};
 function vAdmin(){if(!admin)return vLogin();const pub=signCard();
  const n=S.teams.length,exp=n*(n-1)/2*S.legs,g=gamesSel();
- const chk=act().map(x=>{const f=real(x.id),k=new Set(f.map(y=>[y.a,y.b].sort().join('|')+'|'+(S.fx[x.id].indexOf(y)>=0?'':'')));const pairs=new Set(f.map(y=>[y.a,y.b].sort().join('|')));
-  const ok=f.length===exp&&pairs.size===n*(n-1)/2;return `<div>${esc(x.name)}: ${f.length} of ${exp} matches ${f.length?(ok?'<span class="ok">OK</span>':'<span class="bad">CHECK</span>'):'<span class="mu">not generated</span>'}</div>`}).join('');
+ const chk=act().map(x=>{const f=lg(x.id),p=new Set(f.map(y=>[y.a,y.b].sort().join('|')));const ok=f.length===exp&&p.size===n*(n-1)/2;return `<div>${esc(x.name)}: ${f.length} of ${exp} league matches ${f.length?(ok?'<span class="ok">OK</span>':'<span class="bad">CHECK</span>'):'<span class="mu">not generated</span>'}</div>`}).join('');
+ const rd=n%2?n:n-1,need=n>1?act().length*rd*S.legs+(hasKO()?2*act().length:0):0,have=slotsIn()*(+S.par||1);
+ const kst=act().map(x=>`<div>${esc(x.name)}: league ${lg(x.id).filter(f=>f.done).length}/${lg(x.id).length} played ${ko(x.id).length?'<span class="ok">knockout created</span>':''}</div>`).join('');
+ const rows=(S.fx[g]||[]).filter(f=>f.b||(f.k&&f.a&&f.b)).sort((a,b)=>(a.k?1:0)-(b.k?1:0)||a.r-b.r).map(f=>`<tr><td>${f.k?stg(f):'R'+f.r}<div class="mu">${fd(f)}</div></td><td>${esc(tn(f.a))} v ${esc(tn(f.b))}</td>
+ <td><input type="number" min="0" id="a-${f.id}" value="${f.sa}"> - <input type="number" min="0" id="b-${f.id}" value="${f.sb}"></td>
+ <td><select id="f-${f.id}"><option value="">Played</option><option value="a">${esc(tn(f.a))} wins (forfeit)</option><option value="b">${esc(tn(f.b))} wins (forfeit)</option>${f.k?`<option value="ta"${f.w==='a'?' selected':''}>Level: ${esc(tn(f.a))} wins tie-break</option><option value="tb"${f.w==='b'?' selected':''}>Level: ${esc(tn(f.b))} wins tie-break</option>`:''}</select></td>
+ <td><button class="b ${f.done?'':'g'}" data-a="res" data-id="${f.id}">${f.done?'Update':'Confirm'}</button>${f.done?'<span class="ok"> \u2713</span>':''}</td></tr>`).join('');
  return pub+`<div class="cd"><h2>1. People</h2><p class="mu">Paste one person per line: name, department (copy straight from Excel works too).</p><textarea id="pp" placeholder="Kwame Mensah, Finance"></textarea><div><button class="b" data-a="addp">Add people</button> <span class="mu">${S.people.length} registered. Duplicate names are skipped.</span></div>
- <details><summary class="mu">Show list</summary>${S.people.map(p=>`<div>${esc(p.name)} <span class="mu">${esc(p.dept)}</span> <button class="b r" data-a="delp" data-id="${p.id}"${S.locked?' disabled':''}>x</button></div>`).join('')}</details></div>
+ <details><summary class="mu">Show list</summary>${S.people.map(p=>`<div>${p.vol?'\u2B50 ':''}${esc(p.name)} <span class="mu">${esc(p.dept)} ${esc(p.email||'')}</span> <button class="b r" data-a="delp" data-id="${p.id}"${S.locked?' disabled':''}>x</button></div>`).join('')}</details></div>
  <div class="cd"><h2>2. Teams</h2><div class="row"><label>Number of teams <input type="number" id="nt" min="2" max="12" value="${n||6}"></label><label><input type="checkbox" id="mix" checked> Mix departments</label></div>
- <button class="b" data-a="gen"${S.locked?' disabled':''}>Generate random teams</button><button class="b" data-a="caps">Random captains</button><button class="b ${S.locked?'r':'g'}" data-a="lock">${S.locked?'Unlock teams':'Lock teams'}</button> <span class="mu">${S.locked?'LOCKED':'Open'}</span>
- ${S.teams.map(t=>`<div class="cd"><div class="row"><input data-s="tname" data-id="${t.id}" value="${esc(t.name)}"><select data-s="cap" data-id="${t.id}">${opts(t.m.map(i=>[i,pn(i)]),t.cap,'Captain?')}</select><span class="mu">${t.m.length} members</span></div>
+ <button class="b" data-a="gen"${S.locked?' disabled':''}>Generate random teams</button><button class="b" data-a="caps">Random captains</button><button class="b ${S.locked?'r':'g'}" data-a="lock">${S.locked?'Unlock teams':'Lock teams'}</button> <span class="mu">${S.locked?'LOCKED':'Open'}</span><button class="b" data-a="ann">Copy team announcement</button>
+ ${S.teams.map(t=>`<div class="cd"><div class="row"><input data-s="tname" data-id="${t.id}" value="${esc(t.name)}"><select data-s="cap" data-id="${t.id}">${opts(t.m.map(i=>[i,pn(i)]),t.cap,'Captain?')}</select><span class="mu">${t.m.length} members</span> ${mail(t)}</div>
  <details><summary class="mu">Move members</summary>${t.m.map(i=>`<div class="row">${esc(pn(i))} <select data-s="mv" data-id="${i}"${S.locked?' disabled':''}>${opts(S.teams.map(x=>[x.id,x.name]),t.id)}</select></div>`).join('')}</details></div>`).join('')}</div>
  <div class="cd"><h2>3. Games</h2>${S.games.length?'':'<button class="b g" data-a="defg">Load the 15 default games</button>'}<div class="row"><input id="ng" placeholder="New game name"><button class="b" data-a="addg">Add</button></div>
- ${S.games.map(x=>`<label style="display:block"><input type="checkbox" data-s="gon" data-id="${x.id}"${x.on?' checked':''}> ${esc(x.name)}</label>`).join('')}</div>
- <div class="cd"><h2>4. Fixtures</h2><div class="row"><label>Legs <select data-s="legs">${opts([['1','1 (everyone plays everyone once)'],['2','2 (home and away)']],String(S.legs))}</select></label></div>
- <button class="b g" data-a="genfx"${S.locked&&n>1?'':' disabled'}>Generate fixtures for games without any</button><button class="b r" data-a="delfx">${rst?'Click again to delete ALL':'Delete all fixtures'}</button>
- ${S.locked?'':'<p class="mu">Lock the teams first.</p>'}<div class="mu">${chk}</div></div>
- <div class="cd"><h2>5. Enter results</h2><select data-s="g">${opts(act().map(x=>[x.id,x.name]),g)}</select><div class="tw"><table>${(S.fx[g]||[]).filter(f=>f.b).sort((a,b)=>a.r-b.r).map(f=>`<tr><td>R${f.r}</td><td>${esc(tn(f.a))} v ${esc(tn(f.b))}</td>
- <td><input type="number" min="0" id="a-${f.id}" value="${f.sa}"> - <input type="number" min="0" id="b-${f.id}" value="${f.sb}"></td>
- <td><select id="f-${f.id}"><option value="">Played</option><option value="a">${esc(tn(f.a))} wins (forfeit)</option><option value="b">${esc(tn(f.b))} wins (forfeit)</option></select></td>
- <td><button class="b ${f.done?'':'g'}" data-a="res" data-id="${f.id}">${f.done?'Update':'Confirm'}</button>${f.done?'<span class="ok"> \u2713</span>':''}</td></tr>`).join('')}</table></div></div>
- <div class="cd"><h2>6. Points</h2><div class="row">${S.pts.map((p,i)=>`<label>${['1st','2nd','3rd','4th','Other'][i]} <input type="number" id="p${i}" value="${p}"></label>`).join('')}<label>Win <input type="number" id="pw" value="${S.win}"></label><label>Draw <input type="number" id="pd" value="${S.draw}"></label></div><button class="b" data-a="pts">Save points</button></div>`}
+ ${S.games.map(x=>`<label style="display:block"><input type="checkbox" data-s="gon" data-id="${x.id}"${x.on?' checked':''}> ${esc(x.name)}</label>`).join('')}<p class="mu">Untick games you will not play this time.</p></div>
+ <div class="cd"><h2>4. Fixtures and dates</h2><div class="row"><label>Legs <select data-s="legs">${opts([['1','1 (everyone plays everyone once)'],['2','2 (home and away)']],String(S.legs))}</select></label><label><input type="checkbox" data-s="koon"${S.koOn?' checked':''}> Knockout (top 4: semi-finals, third place, final)</label></div>
+ <div class="row"><label>Start <input type="date" data-s="sd" value="${esc(S.start)}"></label><label>End <input type="date" data-s="ed" value="${esc(S.end)}"></label><label>Times each day <input data-s="tm" value="${esc(S.times)}" placeholder="12:30, 16:00"></label><label>Games at the same time <input type="number" min="1" data-s="par" value="${S.par}"></label></div>
+ <label>Days off (weekends are skipped automatically) <input data-s="off" style="width:100%" value="${esc(S.off)}"></label>
+ <p>Sessions needed: <b>${need}</b> (one session = one round of one game). Space available: <b>${have}</b> <span class="${have>=need?'ok':'bad'}">${have>=need?'It fits':'Too many sessions: add times per day, play more games at once, extend the end date, or untick some games'}</span></p>
+ <button class="b g" data-a="genfx"${S.locked&&n>1?'':' disabled'}>Generate fixtures and dates</button><button class="b" data-a="plan">Re-plan dates</button><button class="b r" data-a="delfx">${rst?'Click again to delete ALL':'Delete all fixtures'}</button>
+ ${S.locked?'':'<p class="mu">Lock the teams first.</p>'}<div class="mu">${chk}</div><p class="mu">${esc(S.note)}</p></div>
+ <div class="cd"><h2>5. Enter results</h2><select data-s="g">${opts(act().map(x=>[x.id,x.name]),g)}</select><div class="tw"><table>${rows}</table></div></div>
+ <div class="cd"><h2>6. Knockout</h2><p class="mu">When a game's league matches are all played, create its semi-finals (1st v 4th, 2nd v 3rd). Winners move to the final automatically and losers to the third-place game. Knockout games cannot end level: pick the tie-break winner. If two teams are level for 4th place, set a tie-break number on the Standings tab first.</p>
+ <button class="b g" data-a="genko">Create knockout for finished leagues</button><div class="mu">${kst}</div></div>
+ <div class="cd"><h2>7. Points</h2><div class="row">${S.pts.map((p,i)=>`<label>${['1st','2nd','3rd','4th','Other'][i]} <input type="number" id="p${i}" value="${p}"></label>`).join('')}<label>Win <input type="number" id="pw" value="${S.win}"></label><label>Draw <input type="number" id="pd" value="${S.draw}"></label></div><button class="b" data-a="pts">Save points</button></div>`}
 const A={
  login(){signInWithEmailAndPassword(auth,$('#lem').value.trim(),$('#lpw').value).catch(()=>toast('Sign in failed'))},
  logout(){signOut(auth)},
  copy(){const i=$('#jl');i.select();try{navigator.clipboard.writeText(i.value);toast('Link copied')}catch(e){document.execCommand('copy')}},
- async imp(){let n=0;for(const g of signups){const nm=(g.name||'').trim();if(nm&&!S.people.some(p=>p.name.toLowerCase()===nm.toLowerCase())){S.people.push({id:uid(),name:nm,dept:(g.dept||'').trim()});n++}
+ async imp(){let n=0;for(const g of signups){const nm=(g.name||'').trim();if(nm&&!S.people.some(p=>p.name.toLowerCase()===nm.toLowerCase())){S.people.push({id:uid(),name:nm,dept:(g.dept||'').trim(),email:(g.email||'').trim(),vol:!!g.cap});n++}
   try{await deleteDoc(doc(fdb,'signups',g.id))}catch(e){}}toast(n+' added');save()},
  fill(){const set=new Set(S.teams.flatMap(t=>t.m));S.people.filter(p=>!set.has(p.id)).forEach(p=>{S.teams.sort((a,b)=>a.m.length-b.m.length)[0].m.push(p.id)});save()},
- join(){const n=$('#jn').value.trim(),d=$('#jd').value.trim();if(n.length<2)return toast('Please enter your name');
-  addDoc(collection(fdb,'signups'),{name:n,dept:d,t:Date.now()}).then(()=>{try{localStorage.setItem('ogtj',n)}catch(e){}render()}).catch(()=>toast('Could not register'))},
+ join(){const n=$('#jn').value.trim(),d=$('#jd').value.trim(),em=$('#je').value.trim().toLowerCase(),cp=$('#jc').checked;if(n.length<2)return toast('Please enter your name');
+  addDoc(collection(fdb,'signups'),{name:n,dept:d,email:em,cap:cp,t:Date.now()}).then(()=>{try{localStorage.setItem('ogtj',n)}catch(e){}render()}).catch(()=>toast('Could not register'))},
  exp(){const u=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='data.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),500)},
- addp(){const lines=$('#pp').value.split(/\r?\n/);let add=0;lines.forEach(l=>{const[n,d]=l.split(/\t|,/).map(x=>x.trim());if(n&&!S.people.some(p=>p.name.toLowerCase()===n.toLowerCase())){S.people.push({id:uid(),name:n,dept:d||''});add++}});toast(add+' added');save()},
+ addp(){const lines=$('#pp').value.split(/\r?\n/);let add=0;lines.forEach(l=>{const[n,d,em]=l.split(/\t|,/).map(x=>x.trim());if(n&&!S.people.some(p=>p.name.toLowerCase()===n.toLowerCase())){S.people.push({id:uid(),name:n,dept:d||'',email:em||''});add++}});toast(add+' added');save()},
  delp(e){S.people=S.people.filter(p=>p.id!==e.dataset.id);save()},
  gen(){if(S.locked)return;const n=Math.max(2,Math.min(12,+$('#nt').value||6));if(S.people.length<n*2)return toast('Not enough people');
   if(S.teams.length&&S.fx&&Object.keys(S.fx).length)return toast('Delete fixtures first');
   const a=S.people.map(p=>({p,r:Math.random()}));a.sort((x,y)=>x.r-y.r);if($('#mix').checked)a.sort((x,y)=>(x.p.dept||'').localeCompare(y.p.dept||''));
   S.teams=Array.from({length:n},(_,i)=>({id:uid(),name:COL[i],cap:'',m:[]}));a.forEach((x,i)=>S.teams[i%n].m.push(x.p.id));S.fx={};save()},
- caps(){S.teams.forEach(t=>t.cap=t.m[Math.floor(Math.random()*t.m.length)]||'');save()},
+ caps(){let v=0;S.teams.forEach(t=>{const vs=t.m.filter(i=>(S.people.find(p=>p.id===i)||{}).vol),pool=vs.length?vs:t.m;if(vs.length)v++;t.cap=pool[Math.floor(Math.random()*pool.length)]||''});toast(v+' of '+S.teams.length+' captains chosen from volunteers');save()},
+ ann(){const t=S.teams.map(x=>x.name+(S.teams.length?'':'')+':\n'+x.m.map(i=>'  '+(i===x.cap?'(Captain) ':'')+pn(i)).join('\n')).join('\n\n');const txt=S.name+' - TEAMS\n\n'+t;
+  try{navigator.clipboard.writeText(txt);toast('Announcement copied')}catch(e){toast('Could not copy')}},
  lock(){if(!S.locked&&S.teams.some(t=>!t.cap))return toast('Every team needs a captain');S.locked=!S.locked;save()},
  defg(){S.games=GAMES.map(n=>({id:uid(),name:n,on:true}));save()},
  addg(){const n=$('#ng').value.trim();if(n){S.games.push({id:uid(),name:n,on:true});save()}},
- genfx(){const ids=S.teams.map(t=>t.id);act().forEach(g=>{if(!(S.fx[g.id]||[]).length)S.fx[g.id]=rr(ids,S.legs)});toast('Fixtures created');save()},
- delfx(){if(!rst){rst=1;render();return}rst=0;S.fx={};save()},
- res(e){const id=e.dataset.id,f=S.fx[gsel].find(x=>x.id===id),ff=$('#f-'+id).value;
-  f.sa=Math.max(0,+$('#a-'+id).value||0);f.sb=Math.max(0,+$('#b-'+id).value||0);if(ff==='a'){f.sa=3;f.sb=0}if(ff==='b'){f.sa=0;f.sb=3}f.done=true;save()},
+ genfx(){const ids=S.teams.map(t=>t.id);act().forEach(g=>{if(!(S.fx[g.id]||[]).length)S.fx[g.id]=rr(ids,S.legs)});save();A.plan()},
+ delfx(){if(!rst){rst=1;render();return}rst=0;S.fx={};S.ko={};S.note='';save()},
+ res(e){const id=e.dataset.id,F=S.fx[gsel],f=F.find(x=>x.id===id),v=$('#f-'+id).value;let sa=Math.max(0,+$('#a-'+id).value||0),sb=Math.max(0,+$('#b-'+id).value||0),w='';
+  if(v==='a'){sa=3;sb=0}else if(v==='b'){sa=0;sb=3}else if(v==='ta')w='a';else if(v==='tb')w='b';
+  if(f.k){if((f.k==='sf1'||f.k==='sf2')&&F.some(x=>(x.k==='f'||x.k==='3p')&&x.done))return toast('The final or third-place game is already played');if(sa===sb&&!w)return toast('Knockout games need a winner: choose the tie-break winner')}
+  Object.assign(f,{sa,sb,w,done:true});if(f.k)adv(gsel);save()},
+ plan(){const gs=act().filter(g=>lg(g.id).length),ts=tlist();if(!gs.length)return toast('Generate fixtures first');if(!ts.length||!/^\d{4}-\d\d-\d\d$/.test(S.start))return toast('Set a start date and at least one time');
+  const ss=[],mr=Math.max(...gs.map(g=>Math.max(...lg(g.id).map(f=>f.r)))),par=Math.max(1,+S.par||1),o=oset();
+  for(let r=1;r<=mr;r++)gs.forEach(g=>{if(lg(g.id).some(f=>f.r===r))ss.push({g:g.id,r})});
+  if(hasKO()){gs.forEach(g=>ss.push({g:g.id,k:'sf'}));gs.forEach(g=>ss.push({g:g.id,k:'fin'}))}
+  const sl=[],d=new Date(S.start+'T12:00');while(sl.length*par<ss.length&&sl.length<3000){if(d.getDay()%6&&!o.has(dkey(d)))ts.forEach(t=>sl.push([dkey(d),t]));d.setDate(d.getDate()+1)}
+  S.ko={};ss.forEach((x,i)=>{const[dy,tm]=sl[Math.floor(i/par)];if(x.k)(S.ko[x.g]=S.ko[x.g]||{})[x.k]=[dy,tm];else(S.fx[x.g]||[]).filter(f=>!f.k&&f.r===x.r).forEach(f=>{f.d=dy;f.tm=tm})});
+  Object.keys(S.ko).forEach(g=>ko(g).forEach(f=>{const p=S.ko[g][f.k==='sf1'||f.k==='sf2'?'sf':'fin'];if(p){f.d=p[0];f.tm=p[1]}}));
+  const last=sl[Math.floor((ss.length-1)/par)][0];S.note=ss.length+' sessions planned up to '+last+(last>S.end?' (AFTER your end date: add times per day or games at once, then Re-plan)':' (fits inside your dates)');toast('Dates planned');save()},
+ genko(){let n=0,msg='';act().forEach(g=>{const F=S.fx[g.id]||[];if(!leagueDone(g.id)||ko(g.id).length)return;const T=table(g.id),a=T[3],b=T[4];
+  if(a&&b&&a.Pts===b.Pts&&a.GD===b.GD&&a.F===b.F&&a.tb===b.tb){msg=g.name+': teams are level for 4th place. Set a tie-break number on the Standings tab.';return}
+  const p=(S.ko||{})[g.id]||{},mk=(k,r,x,y,dt)=>({id:uid(),k,r,a:x,b:y,sa:0,sb:0,done:false,w:'',d:dt?dt[0]:'',tm:dt?dt[1]:''});
+  F.push(mk('sf1',101,T[0].t.id,T[3].t.id,p.sf),mk('sf2',102,T[1].t.id,T[2].t.id,p.sf),mk('3p',103,null,null,p.fin),mk('f',104,null,null,p.fin));S.fx[g.id]=F;n++});
+  toast(msg||n+' knockout stage(s) created');save()},
  pts(){S.pts=[0,1,2,3,4].map(i=>+$('#p'+i).value||0);S.win=+$('#pw').value||0;S.draw=+$('#pd').value||0;toast('Saved');save()}};
-const SEL={form(v){S.formUrl=v.trim();save();return 1},g(v){gsel=v},t(v){tsel=v},legs(v){S.legs=+v;save();return 1},
+const SEL={fg(v){fg=v},sd(v){S.start=v;save();return 1},ed(v){S.end=v;save();return 1},tm(v){S.times=v;save();return 1},off(v){S.off=v;save();return 1},par(v){S.par=Math.max(1,+v||1);save();return 1},tb(v,e){S.tb=S.tb||{};S.tb[e.dataset.id]=+v||0;save();return 1},koon(v,e){S.koOn=e.checked;save();return 1},form(v){S.formUrl=v.trim();save();return 1},g(v){gsel=v},t(v){tsel=v},legs(v){S.legs=+v;save();return 1},
  tname(v,e){S.teams.find(t=>t.id===e.dataset.id).name=v.trim()||'Team';save();return 1},
  cap(v,e){S.teams.find(t=>t.id===e.dataset.id).cap=v;save();return 1},
  gon(v,e){S.games.find(g=>g.id===e.dataset.id).on=e.checked;save();return 1},
