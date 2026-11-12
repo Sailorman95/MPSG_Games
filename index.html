@@ -183,7 +183,7 @@ const A={
  vsend(){const c=document.querySelector('input[name="vc"]:checked');if(!c)return toast('Pick a person');
   setDoc(doc(fdb,'votes',vtok),{voter:vinfo.pid,cand:c.value,team:vinfo.team,t:Date.now()}).then(()=>{vdone=true;render()}).catch(()=>toast('You have already voted, or voting is closed'))},
  caplink(){const em=$('#cle').value.trim().toLowerCase();if(!/^\S+@\S+\.\S+$/.test(em))return toast('Enter your email');
-  sendSignInLinkToEmail(auth,em,{url:base(),handleCodeInApp:true}).then(()=>{localStorage.setItem('ogtmail',em);toast('Check your email for the sign-in link')}).catch(()=>toast('Could not send the link'))},
+  sendSignInLinkToEmail(auth,em,{url:base(),handleCodeInApp:true}).then(()=>{localStorage.setItem('ogtmail',em);toast('Check your email for the sign-in link')}).catch(e=>toast('Could not send: '+(e.code||e.message)))},
  finish(){const em=$('#cfe').value.trim().toLowerCase();signInWithEmailLink(auth,em,location.href).then(()=>{needEm=false;history.replaceState(null,'',location.pathname)}).catch(()=>toast('That did not work. Request a new link.'))},
  async mkv(){const todo=S.people.filter(p=>p.vote&&p.email&&S.teams.some(t=>t.m.includes(p.id))&&!voters.some(v=>v.pid===p.id)),list=[];
   for(const p of todo){const t=S.teams.find(x=>x.m.includes(p.id)),k=tok();await setDoc(doc(fdb,'voters',k),{pid:p.id,team:t.id,t:Date.now()});list.push(vm_(p,t,k))}
@@ -194,7 +194,7 @@ const A={
  cls(){S.teams.forEach(t=>{const c={};votes.filter(v=>v.team===t.id&&t.m.includes(v.cand)).forEach(v=>c[v.cand]=(c[v.cand]||0)+1);const mx=Math.max(0,...Object.values(c));if(mx){const w=Object.keys(c).filter(k=>c[k]===mx);t.cap=w[Math.floor(Math.random()*w.length)]}});S.vclosed=true;toast('Voting closed and captains set');save()},
  opn(){S.vclosed=false;save()},
  async invc(){let n=0;const m={};S.teams.forEach(t=>{const p=pp(t.cap);if(p&&p.email)m[t.id]=p.email.toLowerCase()});CM=m;await setDoc(doc(fdb,'tournament','captains'),{byTeam:m});
-  for(const e of Object.values(m)){try{await sendSignInLinkToEmail(auth,e,{url:base(),handleCodeInApp:true});n++}catch(x){}}toast(n+' of '+S.teams.length+' captains emailed a sign-in link');render()},
+  let er='';for(const e of Object.values(m)){try{await sendSignInLinkToEmail(auth,e,{url:base(),handleCodeInApp:true});n++}catch(x){er=x.code||x.message}}toast(n+' of '+S.teams.length+' captains emailed a sign-in link'+(er?'. Error: '+er:'')+(Object.keys(m).length<S.teams.length?'. Some captains have no email on file':''));render()},
  vw(e){const t=S.teams.find(x=>x.id===e.dataset.id),c={};votes.filter(v=>t.m.includes(v.cand)).forEach(v=>c[v.cand]=(c[v.cand]||0)+1);const mx=Math.max(0,...Object.values(c));if(!mx)return toast('No votes yet');
   const w=Object.keys(c).filter(k=>c[k]===mx);t.cap=w[Math.floor(Math.random()*w.length)];toast(w.length>1?'Tie: one of the leaders was picked at random':'Vote winner set as captain');save()},
  exp(){const u=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='data.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),500)},
